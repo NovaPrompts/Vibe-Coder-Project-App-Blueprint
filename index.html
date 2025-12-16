@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIBE_BOARD // DEVS ONLY</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        void: '#09090b',
+                        surface: '#18181b',
+                        border: '#27272a',
+                        accent: '#d4d4d8',
+                        muted: '#71717a'
+                    },
+                    fontFamily: {
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                        sans: ['"Inter"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #09090b; color: #e4e4e7; }
+        .glass-panel { border: 1px solid #27272a; background: #18181b; }
+        .task-card { cursor: grab; transition: all 0.2s; }
+        .task-card:active { cursor: grabbing; transform: scale(0.98); }
+        .drop-zone { min-height: 200px; transition: background 0.2s; }
+        .drop-zone.drag-over { background: #27272a; }
+        /* Scrollbar hiding for clean look */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+    </style>
+</head>
+<body class="h-screen flex flex-col font-sans overflow-hidden selection:bg-white selection:text-black">
+
+    <header class="h-14 border-b border-border flex items-center px-6 justify-between bg-void/50 backdrop-blur">
+        <div class="font-mono font-bold tracking-tighter text-xl">VIBE_BOARD<span class="text-accent animate-pulse">_</span></div>
+        <div class="text-xs font-mono text-muted">SYS.READY</div>
+    </header>
+
+    <main class="flex-1 flex overflow-hidden">
+        
+        <aside class="w-80 border-r border-border flex flex-col bg-void">
+            
+            <div class="flex-1 flex flex-col p-4 border-b border-border overflow-hidden">
+                <h2 class="font-mono text-xs text-muted uppercase mb-3 flex justify-between">
+                    <span>// SCRATCHPAD_TASKS</span>
+                    <span id="quick-count">0</span>
+                </h2>
+                <div class="flex gap-2 mb-3">
+                    <input type="text" id="quick-input" 
+                        class="w-full bg-surface border border-border px-3 py-2 text-sm focus:outline-none focus:border-accent font-mono placeholder-muted"
+                        placeholder="Add quick task..." onkeypress="handleEnter(event, 'quick-list')">
+                </div>
+                <div id="quick-list" class="flex-1 overflow-y-auto space-y-2 pr-1">
+                    </div>
+            </div>
+
+            <div class="h-1/3 flex flex-col p-4">
+                <h2 class="font-mono text-xs text-muted uppercase mb-2">// SESSION_NOTES</h2>
+                <textarea id="notes-area" 
+                    class="flex-1 bg-surface border border-border p-3 text-sm font-mono resize-none focus:outline-none focus:border-accent leading-relaxed text-muted hover:text-white transition-colors"
+                    placeholder="Dump thoughts here..."></textarea>
+            </div>
+        </aside>
+
+        <section class="flex-1 bg-void p-6 overflow-x-auto">
+            <div class="grid grid-cols-3 gap-6 h-full min-w-[800px]">
+                
+                <div class="flex flex-col h-full">
+                    <div class="flex justify-between items-center mb-4 px-1">
+                        <h3 class="font-mono text-sm font-bold text-accent">TODO</h3>
+                        <span class="text-xs font-mono text-muted" id="todo-count">0</span>
+                    </div>
+                    <div class="mb-3">
+                        <input type="text" class="w-full bg-transparent border-b border-border px-0 py-2 text-sm focus:outline-none focus:border-accent font-mono placeholder-muted"
+                        placeholder="+ Add Task" onkeypress="handleEnter(event, 'todo')">
+                    </div>
+                    <div id="todo" class="drop-zone flex-1 space-y-3 pb-10" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+                </div>
+
+                <div class="flex flex-col h-full">
+                    <div class="flex justify-between items-center mb-4 px-1">
+                        <h3 class="font-mono text-sm font-bold text-yellow-500">IN_PROGRESS</h3>
+                        <span class="text-xs font-mono text-muted" id="in-progress-count">0</span>
+                    </div>
+                    <div id="in-progress" class="drop-zone flex-1 space-y-3 pb-10 bg-surface/30 rounded-lg p-2 border border-dashed border-border/50" 
+                         ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+                </div>
+
+                <div class="flex flex-col h-full">
+                    <div class="flex justify-between items-center mb-4 px-1">
+                        <h3 class="font-mono text-sm font-bold text-emerald-500">COMPLETE</h3>
+                        <span class="text-xs font-mono text-muted" id="done-count">0</span>
+                    </div>
+                    <div id="done" class="drop-zone flex-1 space-y-3 pb-10" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+                </div>
+
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // --- State Management ---
+        const API = '/api';
+        let dragSrcEl = null;
+
+        // --- Init ---
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchTasks();
+            fetchNote();
+            setupNoteAutoSave();
+        });
+
+        // --- Drag & Drop Logic ---
+        function allowDrop(ev) { ev.preventDefault(); ev.currentTarget.classList.add('drag-over'); }
+        
+        // Remove highlight when drag leaves
+        document.addEventListener('dragleave', (e) => {
+            if (e.target.classList.contains('drop-zone')) e.target.classList.remove('drag-over');
+        });
+
+        function drag(ev) {
+            dragSrcEl = ev.target;
+            ev.dataTransfer.effectAllowed = 'move';
+            ev.dataTransfer.setData('text/plain', ev.target.id);
+            setTimeout(() => ev.target.classList.add('opacity-50'), 0);
+        }
+
+        async function drop(ev) {
+            ev.preventDefault();
+            const dropZone = ev.target.closest('.drop-zone');
+            dropZone.classList.remove('drag-over');
+            
+            if (!dropZone) return;
+
+            const taskId = ev.dataTransfer.getData('text/plain');
+            const card = document.getElementById(taskId);
+            
+            // Optimistic UI Update
+            dropZone.prepend(card);
+            card.classList.remove('opacity-50');
+            
+            const newCategory = dropZone.id;
+            const numericId = taskId.replace('task-', '');
+            
+            // API Call
+            try {
+                await fetch(`${API}/tasks/${numericId}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ category: newCategory })
+                });
+                updateCounts();
+            } catch (err) {
+                console.error("Move failed", err);
+                alert("Failed to sync move");
+                window.location.reload();
+            }
+        }
+
+        // --- Task Functions ---
+        async function fetchTasks() {
+            const res = await fetch(`${API}/tasks`);
+            const tasks = await res.json();
+            
+            // Clear lists
+            ['quick-list', 'todo', 'in-progress', 'done'].forEach(id => {
+                document.getElementById(id).innerHTML = '';
+            });
+
+            tasks.forEach(renderTask);
+            updateCounts();
+        }
+
+        function renderTask(task) {
+            const container = document.getElementById(task.category);
+            if (!container) return; // Should not happen
+
+            const el = document.createElement('div');
+            el.className = 'task-card glass-panel p-3 text-sm border-l-2 group relative';
+            el.draggable = true;
+            el.id = `task-${task.id}`;
+            
+            // Color coding borders
+            if(task.category === 'todo') el.classList.add('border-l-accent');
+            else if(task.category === 'in-progress') el.classList.add('border-l-yellow-500');
+            else if(task.category === 'done') el.classList.add('border-l-emerald-500', 'line-through', 'text-muted');
+            else el.classList.add('border-l-purple-500'); // Quick list
+
+            el.innerHTML = `
+                <div class="pr-6 break-words">${task.content}</div>
+                <button onclick="deleteTask(${task.id})" class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-muted hover:text-red-500">×</button>
+            `;
+
+            el.addEventListener('dragstart', drag);
+            el.addEventListener('dragend', (e) => e.target.classList.remove('opacity-50'));
+
+            container.appendChild(el);
+        }
+
+        async function handleEnter(e, category) {
+            if (e.key === 'Enter' && e.target.value.trim()) {
+                const content = e.target.value;
+                e.target.value = '';
+                
+                const res = await fetch(`${API}/tasks`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ content, category })
+                });
+                
+                if (res.ok) {
+                    const task = await res.json();
+                    renderTask(task);
+                    updateCounts();
+                }
+            }
+        }
+
+        async function deleteTask(id) {
+            if(!confirm('Delete task?')) return;
+            document.getElementById(`task-${id}`).remove();
+            await fetch(`${API}/tasks/${id}`, { method: 'DELETE' });
+            updateCounts();
+        }
+
+        function updateCounts() {
+            ['quick-list', 'todo', 'in-progress', 'done'].forEach(id => {
+                const count = document.getElementById(id).children.length;
+                const counter = document.getElementById(id.includes('list') ? 'quick-count' : `${id}-count`);
+                if(counter) counter.innerText = count;
+            });
+        }
+
+        // --- Note Functions ---
+        let noteTimeout;
+        async function fetchNote() {
+            const res = await fetch(`${API}/note`);
+            if(res.ok) {
+                const note = await res.json();
+                document.getElementById('notes-area').value = note.content;
+            }
+        }
+
+        function setupNoteAutoSave() {
+            const area = document.getElementById('notes-area');
+            area.addEventListener('input', () => {
+                clearTimeout(noteTimeout);
+                noteTimeout = setTimeout(async () => {
+                    await fetch(`${API}/note`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ content: area.value })
+                    });
+                    // Subtle save indicator could go here
+                }, 1000); // Auto-save after 1s of inactivity
+            });
+        }
+    </script>
+</body>
+</html>
